@@ -9,11 +9,12 @@ use warnings;
 UTM5::URFAClient - Perl wrapper for Netup URFA Client
 
 =head1 VERSION
+
 Version 0.1
 
 =cut
 
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 
 =head1 SYNOPSIS
 
@@ -40,7 +41,7 @@ Creates connection
 
 	UTM5::URFAClient->new({<options>})
 
-=head3 Options are:
+        Options are:
 
 =over
 
@@ -139,7 +140,7 @@ sub _parse {
 
 sub _exec {
 	my ($self, $cmd, $params) = @_;
-	my $param_string;
+	my $param_string ||= '';
 
 	if($params) {
 		while(my ($key, $value) = each %$params) {
@@ -170,6 +171,73 @@ sub whoami {
 	return $self->_exec('whoami');
 }
 
+
+=head2 user_list
+
+	Returns user list
+
+=cut
+
+sub user_list {
+	my ($self, $param) = @_;
+
+	my $criteria_id = {
+		'LIKE'		=> 1,
+		'='			=> 3,
+		'<>'		=> 4,
+		'>'			=> 7,
+		'<'			=> 8,
+		'>='		=> 9,
+		'<='		=> 10,
+		'NOT LIKE'	=> 11
+	};
+
+	my $what_id = {
+		'User ID'				=> 1,
+		'User login'			=> 2,
+		'Basic account'			=> 3,
+		'Accounting perion id'	=> 4,
+		'Full name'				=> 5,
+		'Create date'			=> 6,
+		'Last change date'		=> 7,
+		'Who create'			=> 8,
+		'who change'			=> 9,
+		'Is legal'				=> 10,
+		'Juridical address'		=> 11,
+		'Actual address'		=> 12,
+		'Work phone'			=> 13,
+		'Home phone'			=> 14,
+		'Mobile phone'			=> 15,
+		'Web page'				=> 16,
+		'ICQ number'			=> 17,
+		'Tax number'			=> 18,
+		'KPP number'			=> 19,
+		'House id'				=> 21,
+		'Flat number'			=> 22,
+		'Entrance'				=> 23,
+		'Floor'					=> 24,
+		'Email'					=> 25,
+		'Passport'				=> 26,
+		'IP'					=> 28,
+		'Group ID'				=> 30,
+		'Balance'				=> 31,
+		'Personal manager'		=> 32,
+		'Connect date'			=> 33,
+		'Comments'				=> 34,
+		'Internet status'		=> 35,
+		'Tariff ID'				=> 36,
+		'Service ID'			=> 37,
+		'Slink ID'				=> 38,
+		'TPLink ID'				=> 39,
+		'District'				=> 40,
+		'Building'				=> 41,
+		'MAC'					=> 42,
+		'Login in service link'	=> 43,
+		'External ID'			=> 44
+	};
+
+
+}
 =head1 AUTHOR
 
 Nikita Melikhov, C<< <ver at 0xff.su> >>
@@ -200,18 +268,6 @@ L<http://www.netup.ru/>
 =item * RT: CPAN's request tracker
 
 L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=UTM5-URFAClient>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/UTM5-URFAClient>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/UTM5-URFAClient>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/UTM5-URFAClient/>
 
 =back
 

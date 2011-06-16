@@ -4,7 +4,13 @@ Makefile.PL
 README
 lib/UTM5/URFAClient.pm
 t/00-load.t
+t/01-strict.t
+t/02-fixme.t
+t/03-critic.t
+t/04-metrics.t
+t/06-pod.t
+t/07-pod-coverage.t
+t/08-test-coverage.t
+t/boilerplate.t
 t/manifest.t
-t/pod-coverage.t
-t/pod.t
 META.yml                                 Module meta-data (added by MakeMaker)
