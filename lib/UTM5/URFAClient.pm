@@ -10,19 +10,18 @@ UTM5::URFAClient - Perl wrapper for Netup URFA Client
 
 =head1 VERSION
 
-Version 0.1
+
+0.3
 
 =cut
 
-our $VERSION = '0.2';
+our $VERSION = '0.3';
 
 =head1 SYNOPSIS
 
 	use UTM5::Client;
 	my $client = new UTM5::URFAClient({
-		host		=> 'netup.example.com',
-		login		=> 'ssh_netup',
-		exec		=> '/netup/utm5/bin/utm5_urfaclient',
+		path		=> '/netup/utm5',
 		user		=> 'remote_user',
 		password	=> 'remote_password'
 	});
@@ -32,6 +31,7 @@ our $VERSION = '0.2';
 
 use Net::SSH::Perl;
 use XML::Twig;
+use XML::Writer;
 
 =head1 SUBROUTINES/METHODS
 
@@ -45,18 +45,9 @@ Creates connection
 
 =over
 
-=item * host
+=item * path
 
-	Remote host with Netup UTM5 with URFAClient module installed
-
-
-=item * login
-
-	Remote SSH user
-
-=item * exec
-
-	Path to the urfaclient binary
+	Path to the UTM5
 
 =item * user
 
@@ -75,12 +66,13 @@ sub new {
 
 	bless $self, $class;
 
-	#warn " * Initializing SSH connection to $self->{host}...";
-	$self->{ssh} = Net::SSH::Perl->new($self->{host}, { debug => 1 });
-	#warn "DONE\n";
-	#warn " * Logging in, user: $self->{login}...";
-	$self->{ssh}->login($self->{login}) || die "ssh: $!";
-	#print "DONE\n";
+	# If no host/login specified use local execution
+	if(!$self->{host} || !$self->{login}) {
+		$self->{_local} = 1;
+	} else {
+		$self->{ssh} = Net::SSH::Perl->new($self->{host}, { debug => 1 });
+		$self->{ssh}->login($self->{login}) || die "ssh: $!";
+	}
 
 	return $self;
 }
@@ -91,13 +83,17 @@ sub new {
 
 =cut
 
+# Returns SSH connection if exist
 sub ssh {
 	my $self = shift;
+
+	return undef if $self->{_local};
 
 	return $self->{ssh} if $self->{ssh};
 	die "Errors while connecting via SSH";
 }
 
+# XML array parsing callback
 sub _parse_array {
 	my ($data, $t, $array) = @_;
 	my $name = $array->prev_sibling('integer')->att('name');
@@ -114,6 +110,7 @@ sub _parse_array {
 	}
 }
 
+# XML field parsing callback
 sub _parse_field {
 	my ($data, $element, $isArray) = @_;
 
@@ -122,6 +119,7 @@ sub _parse_field {
 	}
 }
 
+# Parse XML response
 sub _parse {
 	my ($self, $data) = @_;
 	my $result = {};
@@ -138,19 +136,49 @@ sub _parse {
 	return $result;
 }
 
+# Creating temporary XML file for UTM5
+sub _create_xml {
+	my ($self, $cmd, $params) = @_;
+
+	$self->{_fname} = 'tmp'.int((time * (rand() * 10000)) / 1000);
+	open FILE, ">$self->{path}/xml/$self->{_fname}.xml";
+
+	my $writer = new XML::Writer(OUTPUT => \*FILE, ENCODING => 'utf-8');
+	$writer->startTag('urfa');
+
+	if(!$params) {
+		$writer->emptyTag('call', function => $cmd);
+	} else {
+		$writer->startTag('call', function => $cmd);
+
+		while(my ($key, $value) = each %$params) {
+		    $writer->emptyTag('parameter', name => $key, value => $value);
+		}
+
+		$writer->endTag('call');
+    }
+
+	$writer->endTag('urfa');
+	$writer->end();
+
+	close FILE;
+	return $self->{_fname};
+}
+
 sub _exec {
 	my ($self, $cmd, $params) = @_;
 	my $param_string ||= '';
 
-	if($params) {
-		while(my ($key, $value) = each %$params) {
-			$param_string .= " $key=$value";
-		}
-	}
+	my ($stdout, $stderr, $exit);
 
-	#print " * Executing SSH command: $cmd";
-	my ($stdout, $stderr, $exit) = $self->ssh->cmd("$self->{exec} -l '$self->{user}' -P '$self->{password}' -a $cmd $param_string");
-	#print "DONE\n\n";
+	$cmd = $self->_create_xml($cmd, $params);
+
+	if($self->{_local}) {
+		$stdout = `$self->{path}/bin/utm5_urfaclient -l '$self->{user}' -P '$self->{password}' -a $cmd`;
+		#unlink $self->{_fname};
+	} else {
+		($stdout, $stderr, $exit) = $self->ssh->cmd("$self->{path}/bin/utm5_urfaclient -l '$self->{user}' -P '$self->{password}' -a $cmd $param_string");
+	}
 
 	my $result = _parse($self, $stdout);
 
@@ -168,7 +196,7 @@ sub _exec {
 sub whoami {
 	my $self = shift;
 
-	return $self->_exec('whoami');
+	return $self->_exec('rpcf_whoami');
 }
 
 
@@ -238,6 +266,21 @@ sub user_list {
 
 
 }
+
+=head2
+
+	Returns use groups array
+
+=cut
+
+sub get_user_groups {
+	my ($self, $params) = @_;
+
+	#return () if not $params->{user_id};
+
+	return $self->_exec('rpcf_get_groups_list', { user_id => $params->{user_id} });
+}
+
 =head1 AUTHOR
 
 Nikita Melikhov, C<< <ver at 0xff.su> >>
