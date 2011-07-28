@@ -1,6 +1,6 @@
 package UTM5::URFAClient;
 
-use v5.10;
+#use v5.10;
 use strict;
 use warnings;
 
@@ -8,32 +8,47 @@ use warnings;
 
 UTM5::URFAClient - Perl wrapper for Netup URFA Client
 
+Using with L<UTM5::URFAClient::Daemon>
+
 =head1 VERSION
 
 
-0.3
+Version 0.53
 
 =cut
 
-our $VERSION = '0.3';
+our $VERSION = '0.53';
 
 =head1 SYNOPSIS
 
-	use UTM5::Client;
+	use UTM5::URFAClient;
 	my $client = new UTM5::URFAClient({
-		path		=> '/netup/utm5',
-		user		=> 'remote_user',
-		password	=> 'remote_password'
+		url			=> 'http://example.com/',
 	});
 	print $client->whoami->{login};
 
 =cut
 
-use Net::SSH::Perl;
+use Frontier::Client;
 use XML::Twig;
-use XML::Writer;
+
+#use utf8;
+#use encoding 'utf-8';
+
+use Carp;
+#use Data::Dumper;
+
+our $SERVICE_TYPES = {
+	1	=> 'Once service',
+	2	=> 'Periodic service',
+	3	=> 'IP-traffic service',
+	4	=> 'Hotspot service',
+	5	=> 'Dial-up service',
+	6	=> 'Telephony service'
+};
 
 =head1 SUBROUTINES/METHODS
+
 
 =head2 new
 
@@ -41,21 +56,10 @@ Creates connection
 
 	UTM5::URFAClient->new({<options>})
 
-        Options are:
 
-=over
+=item * url
 
-=item * path
-
-	Path to the UTM5
-
-=item * user
-
-	URFA client user
-
-=item * password
-
-	URFA client password
+	Remote host and port with UTM5::URFAClient::Daemon daemon
 
 =back
 
@@ -66,31 +70,14 @@ sub new {
 
 	bless $self, $class;
 
-	# If no host/login specified use local execution
-	if(!$self->{host} || !$self->{login}) {
-		$self->{_local} = 1;
-	} else {
-		$self->{ssh} = Net::SSH::Perl->new($self->{host}, { debug => 1 });
-		$self->{ssh}->login($self->{login}) || die "ssh: $!";
+	# TODO: Check remote/local
+	if(not $self->{url}) {
+		croak "Daemon URL not specified";
 	}
 
+	$self->{_server} = Frontier::Client->new(url => $self->{url});
+
 	return $self;
-}
-
-=head2 ssh
-
-	Returns current SSH connection
-
-=cut
-
-# Returns SSH connection if exist
-sub ssh {
-	my $self = shift;
-
-	return undef if $self->{_local};
-
-	return $self->{ssh} if $self->{ssh};
-	die "Errors while connecting via SSH";
 }
 
 # XML array parsing callback
@@ -121,8 +108,12 @@ sub _parse_field {
 
 # Parse XML response
 sub _parse {
-	my ($self, $data) = @_;
+	my ($self, $data2, $data) = @_;
 	my $result = {};
+
+	if(not $data =~ /^\<\?xml/) {
+		$data = '<?xml version="1.0" encoding="utf-8"?>' . $data;
+	}
 
 	my $t = XML::Twig->new(twig_handlers => {
 		'integer'		=> sub { _parse_field($result, $_) },
@@ -136,51 +127,20 @@ sub _parse {
 	return $result;
 }
 
-# Creating temporary XML file for UTM5
-sub _create_xml {
-	my ($self, $cmd, $params) = @_;
-
-	$self->{_fname} = 'tmp'.int((time * (rand() * 10000)) / 1000);
-	open FILE, ">$self->{path}/xml/$self->{_fname}.xml";
-
-	my $writer = new XML::Writer(OUTPUT => \*FILE, ENCODING => 'utf-8');
-	$writer->startTag('urfa');
-
-	if(!$params) {
-		$writer->emptyTag('call', function => $cmd);
-	} else {
-		$writer->startTag('call', function => $cmd);
-
-		while(my ($key, $value) = each %$params) {
-		    $writer->emptyTag('parameter', name => $key, value => $value);
-		}
-
-		$writer->endTag('call');
-    }
-
-	$writer->endTag('urfa');
-	$writer->end();
-
-	close FILE;
-	return $self->{_fname};
-}
-
 sub _exec {
-	my ($self, $cmd, $params) = @_;
-	my $param_string ||= '';
+	my ($self, $cmd, $params, $data) = @_;
 
-	my ($stdout, $stderr, $exit);
+	# TODO: Remote/local request
+	my $call = $self->{_server}->call('query', $cmd, $params, $data);
+	#warn "\nCALL: $call\n\n";
 
-	$cmd = $self->_create_xml($cmd, $params);
+	my $result = $call;
 
-	if($self->{_local}) {
-		$stdout = `$self->{path}/bin/utm5_urfaclient -l '$self->{user}' -P '$self->{password}' -a $cmd`;
-		#unlink $self->{_fname};
-	} else {
-		($stdout, $stderr, $exit) = $self->ssh->cmd("$self->{path}/bin/utm5_urfaclient -l '$self->{user}' -P '$self->{password}' -a $cmd $param_string");
+	#warn "\n\n".$result."\n\n";
+
+	if($result =~ /\<urfa\>/) {
+		$result = $self->_parse($self, $call);
 	}
-
-	my $result = _parse($self, $stdout);
 
 	return $result;
 }
@@ -194,11 +154,12 @@ sub _exec {
 =cut
 
 sub whoami {
-	my $self = shift;
+	my ($self, $params) = @_;
 
 	return $self->_exec('rpcf_whoami');
 }
 
+### USERS ###
 
 =head2 user_list
 
@@ -207,7 +168,7 @@ sub whoami {
 =cut
 
 sub user_list {
-	my ($self, $param) = @_;
+	my ($self, $params) = @_;
 
 	my $criteria_id = {
 		'LIKE'		=> 1,
@@ -267,9 +228,9 @@ sub user_list {
 
 }
 
-=head2
+=head2 get_user_groups
 
-	Returns use groups array
+	Return users groups array
 
 =cut
 
@@ -281,6 +242,272 @@ sub get_user_groups {
 	return $self->_exec('rpcf_get_groups_list', { user_id => $params->{user_id} });
 }
 
+### HOUSES ###
+
+=head2 get_houses_list
+
+	Return houses list
+
+=cut
+
+sub get_houses_list {
+	my ($self, $params) = @_;
+
+	return $self->_exec('rpcf_get_houses_list');
+}
+
+
+=head2 get_house
+
+	Return house data
+
+=cut
+
+sub get_house {
+	my ($self, $params) = @_;
+
+	return {} if not int($params->{house_id});
+
+	return $self->_exec('rpcf_get_house', { house_id => $params->{house_id} });
+}
+
+
+=head2 add_house
+
+	Add new house
+
+=cut
+
+sub add_house {
+	my ($self, $params) = @_;
+
+	return {} if not ($params->{country} &&
+					  $params->{city} &&
+					  $params->{street} &&
+					  $params->{number}
+	);
+
+	return $self->_exec('rpcf_add_house', {
+		house_id		=> 0,
+		connect_date	=> time,
+		post_code		=> ($params->{post_code} ? $params->{post_code} : ''),
+		country			=> $params->{country},
+		region			=> ($params->{region} ? $params->{region} : ''),
+		city			=> $params->{city},
+		street			=> $params->{street},
+		number			=> $params->{number},
+		building		=> ($params->{building} ? $params->{building} : '')
+	});
+}
+
+
+=head2 edit_house
+
+	Edit house
+
+=cut
+
+sub edit_house {
+	my ($self, $params) = @_;
+
+	return {} if not (defined($params->{house_id}) &&
+					  defined($params->{country}) &&
+					  defined($params->{city}) &&
+					  defined($params->{street}) &&
+					  defined($params->{number})
+	);
+
+	return $self->_exec('rpcf_add_house', {
+		house_id		=> $params->{house_id},
+		connect_date	=> ($params->{connect_date} ? $params->{connect_date} : time),
+		post_code		=> ($params->{post_code} ? $params->{post_code} : ''),
+		country			=> $params->{country},
+		region			=> ($params->{region} ? $params->{region} : ''),
+		city			=> $params->{city},
+		street			=> $params->{street},
+		number			=> $params->{number},
+		building		=> (defined($params->{building}) ? $params->{building} : '')
+	});
+}
+
+
+
+### IPZONES ###
+
+=head2 get_ipzones_list
+
+	Return ip-zones list
+
+=cut
+
+sub get_ipzones_list {
+	my ($self, $params) = @_;
+
+	return $self->_exec('rpcf_get_ipzones_list');
+}
+
+
+
+### Services ###
+#
+# Service types:
+#	1	Once service
+#	2 	Periodic service
+#	3 	IP-traffic
+#	4	Hotspot
+#	5	Dialup
+#	6	Telephony
+#
+# Service status
+#	0	Service
+#	1	Service template
+#	2	Tariff service
+
+=head2 get_services_templates
+
+	Returns services templates
+
+=cut
+
+sub get_services_templates {
+	my ($self, $params) = @_;
+
+	my $services = $self->_exec('rpcf_get_services_list')->{services_count};
+
+	my $result;
+
+	for my $s (@$services) {
+		push @$result, $s if $s->{service_status_array} eq 1;
+	}
+
+	return $result;
+}
+
+
+=head2 get_services_list
+
+	Returns services list
+
+=cut
+
+sub get_services_list {
+	my ($self, $params) = @_;
+
+	return $self->_exec('rpcf_get_services_list', $params)->{services_count};
+}
+
+
+=head2 get_telephony_service
+
+	Returns telephony service info
+
+=cut
+
+sub get_telephony_service {
+	my ($self, $params) = @_;
+
+	return {} if not defined $params->{service_id};
+
+	return $self->_exec('rpcf_get_telephony_service_ex', $params);
+}
+
+=head2 edit_telephony_service
+
+	Updating telephony service
+
+=cut
+
+sub edit_telephony_service {
+	my ($self, $params, $data) = @_;
+
+	return {} if not (defined $params->{service_id} &&
+					  defined $params->{service_name});
+
+	return $self->_exec('rpcf_edit_telephony_service_ex', $params, $data);
+}
+
+
+### TARIFFS ###
+
+=head2 get_tariffs_list
+
+	Returns tariffs list
+
+=cut
+
+sub get_tariffs_list {
+	my ($self, $params) = @_;
+
+	return $self->_exec('rpcf_get_tariffs_list')->{tariffs_count};
+}
+
+
+=head2 get_tariff
+
+	Returns tariff
+
+=cut
+
+sub get_tariff {
+	my ($self, $params) = @_;
+
+	return {} if not $params->{tariff_id};
+
+	return $self->_exec('rpcf_get_tariff', $params);
+}
+
+
+
+
+### Directions ###
+
+=head2 get_directions_list
+
+	Returns direction list
+
+=cut
+
+sub get_directions_list {
+	my ($self, $params) = @_;
+
+	return $self->_exec('rpcf_get_directions')->{count};
+}
+
+
+=head2 add_direction
+
+	Add new direction
+
+=cut
+
+sub add_direction {
+	my ($self, $params) = @_;
+
+	$params->{id} = 0;
+
+	return {} if not (defined($params->{prefix}) &&
+					  defined($params->{name}));
+
+	return $self->_exec('rpcf_add_direction_new', $params)->{id};
+}
+
+
+=head2 del_direction
+
+	Delete direction
+
+=cut
+
+sub del_direction {
+	my ($self, $params) = @_;
+
+	return {} if not $params->{direction_id};
+
+	return $self->_exec('rpcf_del_dir', { dir_id => int($params->{direction_id}) });
+}
+
+
+
 =head1 AUTHOR
 
 Nikita Melikhov, C<< <ver at 0xff.su> >>
@@ -288,8 +515,8 @@ Nikita Melikhov, C<< <ver at 0xff.su> >>
 =head1 BUGS
 
 Please report any bugs or feature requests to C<bug-utm5-urfaclient at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=UTM5-URFAClient>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=UTM5-URFAClient>.
+I will be notified, and then you'll automatically be notified of progress on your bug as I make changes.
 
 
 
