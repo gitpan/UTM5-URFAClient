@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               UTM5-URFAClient
-version:            0.53
+version:            0.54
 abstract:           Perl wrapper for Netup URFA Client
 author:
     - VeroLom <ver@0xff.su>

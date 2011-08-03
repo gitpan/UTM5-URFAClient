@@ -13,11 +13,11 @@ Using with L<UTM5::URFAClient::Daemon>
 =head1 VERSION
 
 
-Version 0.53
+Version 0.54
 
 =cut
 
-our $VERSION = '0.53';
+our $VERSION = '0.54';
 
 =head1 SYNOPSIS
 
@@ -90,7 +90,11 @@ sub _parse_array {
 		my $item_data = {};
 
 		foreach my $child ($item->children) {
-			_parse_field($item_data, $child, 1);
+			if($child->tag eq 'array') {
+				_parse_array($item_data, $child, $child);
+			} else {
+				_parse_field($item_data, $child, 1);
+			}
 		}
 
 		push @{$data->{$name}}, $item_data;
@@ -167,7 +171,24 @@ sub whoami {
 
 =cut
 
-sub user_list {
+sub users_list {
+	my ($self, $params) = @_;
+
+	$params->{from} ||= 0;
+	$params->{to} ||= 999999999;
+
+	return $self->_exec('rpcf_get_users_list', $params);
+}
+
+
+=head2 user_search
+
+	Returns user list by criteria
+	Not implemented in this version
+
+=cut
+
+sub user_search {
 	my ($self, $params) = @_;
 
 	my $criteria_id = {
